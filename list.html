@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{$title}</title>
+</head>
+<body>
+    <a href="http://{$host}/{$path}">..</a>
+    <ul>
+        {foreach:list}
+        <li><a href="http://{$host}/{$path}/{$list.title}">{$list.title}</a></li>
+        {/foreach}
+    </ul>
+</body>
+</html>
