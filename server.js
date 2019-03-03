@@ -22,7 +22,7 @@ module.exports = class Server {
         if (pathname == '/favicon.ico') return;
         try {
             const statObj = await fs.statSync(filepath);
-            statObj.isDirectory() ? this.sendList(req, res, filepath, pathname) : this.sendFile(req, res, filepath, statObj);
+            statObj.isDirectory() ? this.sendFolder(req, res, filepath, pathname) : this.sendFile(req, res, filepath, statObj);
         } catch (e) {
             console.error(e)
             this.sendError(req, res);
@@ -34,38 +34,44 @@ module.exports = class Server {
     }
     sendFile(req, res, filepath, statObj) {
         res.setHeader('Content-type', mime.getType(filepath));
-        let encoding = this.getEncoding(req, res);
-        const rs = this.getStream(req, res, filepath, statObj);
-        encoding ? rs.pipe(encoding).pipe(res) : rs.pipe(res);
+        const encoding = this.getEncoding(req, res);
+        const range = this.getRange(req, statObj);
+        range.size > range.end ?  
+            encoding ? this.getStream(res, range.start, range.end, range.size, filepath).pipe(encoding).pipe(res) : this.getStream(res, range.start, range.end, range.size, filepath).pipe(res)
+            :
+            this.rangeError(res, range.start, range.end, range.size);
     }
-    sendList(req, res, filepath, pathname) {
+    sendFolder(req, res, filepath, pathname) {
         const fileList = fs.readdirSync(filepath);
         const dirTitle = path.basename(filepath);
         const html = template(fs.readFileSync("list.html", 'utf-8'), {title: dirTitle, path: pathname, host: this.option.hostname + ":" + this.option.port, list: fileList.map((name) => ({title: name}))})
         res.setHeader('Content-Type', 'text/html');
         res.end(html);
     }
-    getStream(req, res, filepath, statObj) {
-        let start = 0;
-        // let end = statObj.size - 1;
-        let end = statObj.size - 1;
-        let range = req.headers['range'];
-        if (range) {
-            let result = range.match(/bytes=(\d*)-(\d*)/); //不可能有小数，网络传输的最小单位为一个字节
-            if (result) {
-                start = isNaN(result[1]) || result[1] === '' ? 0 : parseInt(result[1]);
-                // end = isNaN(result[2])?end:parseInt(result[2]) - 1;
-                end = isNaN(result[2]) || result[2] === '' ? end : parseInt(result[2]);
-            }
-
+    getRange(req, statObj) {
+        const result = req.headers['range'] ? req.headers['range'].match(/bytes=(\d*)-(\d*)/) : null;
+        const start = result === null || isNaN(result[1]) || result[1] === '' ? 0 : parseInt(result[1]);
+        const end = result === null || isNaN(result[2]) || result[2] === '' ? statObj.size - 1 : parseInt(result[2]);
+        return {
+            start,
+            end,
+            size: statObj.size
         }
+    }
+    getStream(res, start, end, size, filepath) {
         res.setHeader('Accept-Range', 'bytes');
-        res.setHeader('Content-Range', `bytes ${start}-${end}/${statObj.size}`);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
         res.setHeader('Content-Length', end - start + 1);
         res.statusCode = 206; //返回整个数据的一块
         return fs.createReadStream(filepath, {
             start: start, end: end
         });
+    }
+    rangeError(res, start, end, size) {
+        res.setHeader('Accept-Range', 'bytes');
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+        res.statusCode = 416;
+        res.end();
     }
     getEncoding(req, res) {
         let acceptEncoding = req.headers['accept-encoding'];
